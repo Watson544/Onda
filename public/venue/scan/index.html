@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f0f0f" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Onda — Scan Pass</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #fff;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    header {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    header .logo {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #a78bfa;
+    }
+
+    header .subtitle { font-size: 13px; color: #888; }
+
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 24px;
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 16px;
+    }
+
+    .card h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #e5e5e5;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus { border-color: #a78bfa; }
+
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:active:not(:disabled) { opacity: 0.8; }
+
+    .btn-primary { background: #a78bfa; color: #0f0f0f; }
+    .btn-secondary { background: #2a2a2a; color: #e5e5e5; margin-top: 10px; }
+
+    .mt { margin-top: 12px; }
+
+    /* Status banner */
+    #status {
+      display: none;
+      width: 100%;
+      max-width: 480px;
+      border-radius: 12px;
+      padding: 16px 20px;
+      font-size: 15px;
+      font-weight: 500;
+      text-align: center;
+      margin-bottom: 16px;
+      animation: fadeIn 0.2s ease;
+    }
+
+    #status.success { background: #14532d; border: 1px solid #166534; color: #4ade80; display: block; }
+    #status.error   { background: #450a0a; border: 1px solid #7f1d1d; color: #f87171; display: block; }
+    #status.info    { background: #1e1b4b; border: 1px solid #312e81; color: #a5b4fc; display: block; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+    /* Pass code input — large for easy paste */
+    #passCodeInput {
+      font-size: 18px;
+      font-family: monospace;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* Camera scan section */
+    #cameraSection { display: none; }
+    #videoEl {
+      width: 100%;
+      border-radius: 10px;
+      background: #000;
+      aspect-ratio: 1;
+      object-fit: cover;
+    }
+
+    .pass-detail {
+      margin-top: 16px;
+      background: #111;
+      border-radius: 10px;
+      padding: 16px;
+      display: none;
+    }
+
+    .pass-detail.visible { display: block; }
+
+    .pass-detail .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #aaa;
+    }
+
+    .pass-detail .row span:last-child { color: #e5e5e5; font-weight: 500; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge-active   { background: #14532d; color: #4ade80; }
+    .badge-used     { background: #451a03; color: #fb923c; }
+    .badge-pending  { background: #1c1917; color: #a8a29e; }
+    .badge-expired  { background: #1c1917; color: #a8a29e; }
+    .badge-refunded { background: #450a0a; color: #f87171; }
+
+    /* Auth section */
+    #authSection { display: block; }
+    #scanSection { display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">Onda</div>
+    <div class="subtitle">Venue Staff Scanner</div>
+  </div>
+</header>
+
+<div id="status"></div>
+
+<!-- Auth Gate -->
+<div id="authSection" class="card">
+  <h2>Staff Login</h2>
+  <label for="emailInput">Email</label>
+  <input id="emailInput" type="text" placeholder="staff@venue.com" autocomplete="email" />
+  <label for="passwordInput" class="mt">Password</label>
+  <input id="passwordInput" type="password" placeholder="••••••••" autocomplete="current-password" />
+  <button class="btn-primary mt" id="loginBtn" onclick="login()">Sign In</button>
+</div>
+
+<!-- Scanner -->
+<div id="scanSection" class="card">
+  <h2>Redeem Skip Pass</h2>
+
+  <label for="passCodeInput">Pass Code</label>
+  <input
+    id="passCodeInput"
+    type="text"
+    placeholder="Paste or type pass code"
+    autocomplete="off"
+    autocorrect="off"
+    spellcheck="false"
+  />
+
+  <button class="btn-primary mt" id="redeemBtn" onclick="redeemByCode()">Redeem Pass</button>
+  <button class="btn-secondary" onclick="toggleCamera()">Use Camera</button>
+
+  <div id="cameraSection">
+    <video id="videoEl" autoplay playsinline muted></video>
+    <button class="btn-secondary mt" onclick="captureFrame()">Scan Frame</button>
+  </div>
+
+  <div id="passDetail" class="pass-detail">
+    <div class="row"><span>Status</span><span id="detailStatus">—</span></div>
+    <div class="row"><span>Pass Code</span><span id="detailCode">—</span></div>
+    <div class="row"><span>Expires</span><span id="detailExpires">—</span></div>
+  </div>
+
+  <button class="btn-secondary mt" onclick="logout()">Sign Out</button>
+</div>
+
+<script>
+  // ---- Config ----
+  const API = '';  // same origin; adjust if API is on a different port
+
+  // ---- State ----
+  let authToken = sessionStorage.getItem('onda_staff_token') || null;
+  let cameraStream = null;
+
+  // ---- Init ----
+  (function init() {
+    if (authToken) showScanner();
+  })();
+
+  // ---- Auth ----
+  async function login() {
+    const email    = document.getElementById('emailInput').value.trim();
+    const password = document.getElementById('passwordInput').value;
+
+    if (!email || !password) { showStatus('Enter your email and password.', 'error'); return; }
+
+    setLoading('loginBtn', true);
+
+    try {
+      // Use Supabase Auth REST directly
+      const supabaseUrl = document.querySelector('meta[name="supabase-url"]')?.content
+        || window.__SUPABASE_URL__
+        || '';
+
+      // Fall back to calling our own /api/auth/login if needed
+      const res = await fetch(`${API}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        showStatus(json.error || 'Login failed', 'error');
+        return;
+      }
+
+      authToken = json.access_token;
+      sessionStorage.setItem('onda_staff_token', authToken);
+      showScanner();
+    } catch (err) {
+      showStatus('Network error. Check your connection.', 'error');
+    } finally {
+      setLoading('loginBtn', false);
+    }
+  }
+
+  function logout() {
+    authToken = null;
+    sessionStorage.removeItem('onda_staff_token');
+    stopCamera();
+    document.getElementById('authSection').style.display = 'block';
+    document.getElementById('scanSection').style.display  = 'none';
+    clearStatus();
+    document.getElementById('passDetail').classList.remove('visible');
+  }
+
+  function showScanner() {
+    document.getElementById('authSection').style.display = 'none';
+    document.getElementById('scanSection').style.display  = 'block';
+    document.getElementById('passCodeInput').focus();
+  }
+
+  // ---- Redeem by manual code ----
+  async function redeemByCode() {
+    const code = document.getElementById('passCodeInput').value.trim();
+    if (!code) { showStatus('Enter a pass code.', 'error'); return; }
+
+    setLoading('redeemBtn', true);
+    clearDetail();
+
+    try {
+      const res = await fetch(`${API}/api/passes/redeem`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ pass_code: code }),
+      });
+
+      const json = await res.json();
+
+      if (res.status === 401) { logout(); return; }
+
+      if (res.ok) {
+        showStatus('Pass redeemed successfully!', 'success');
+        document.getElementById('passCodeInput').value = '';
+      } else {
+        showStatus(json.error || 'Redemption failed', 'error');
+        // If the server returned pass detail in error, show it
+        if (json.pass) renderPassDetail(json.pass);
+      }
+    } catch {
+      showStatus('Network error. Try again.', 'error');
+    } finally {
+      setLoading('redeemBtn', false);
+    }
+  }
+
+  // ---- Camera ----
+  function toggleCamera() {
+    const sec = document.getElementById('cameraSection');
+    if (sec.style.display === 'block') {
+      stopCamera();
+      sec.style.display = 'none';
+    } else {
+      sec.style.display = 'block';
+      startCamera();
+    }
+  }
+
+  async function startCamera() {
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 1280 } },
+      });
+      document.getElementById('videoEl').srcObject = cameraStream;
+    } catch {
+      showStatus('Camera access denied.', 'error');
+      document.getElementById('cameraSection').style.display = 'none';
+    }
+  }
+
+  function stopCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((t) => t.stop());
+      cameraStream = null;
+    }
+  }
+
+  // Capture a frame and decode QR using BarcodeDetector API (Chrome/Android)
+  async function captureFrame() {
+    const video = document.getElementById('videoEl');
+    if (!video.srcObject) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    if ('BarcodeDetector' in window) {
+      try {
+        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          const code = barcodes[0].rawValue;
+          document.getElementById('passCodeInput').value = code;
+          stopCamera();
+          document.getElementById('cameraSection').style.display = 'none';
+          await redeemByCode();
+        } else {
+          showStatus('No QR code detected. Try again.', 'info');
+        }
+      } catch {
+        showStatus('QR detection failed. Enter code manually.', 'error');
+      }
+    } else {
+      showStatus('QR scanning not supported in this browser. Enter code manually.', 'info');
+    }
+  }
+
+  // ---- UI helpers ----
+  function showStatus(msg, type) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = type;
+  }
+
+  function clearStatus() {
+    const el = document.getElementById('status');
+    el.textContent = '';
+    el.className = '';
+    el.style.display = 'none';
+  }
+
+  function setLoading(btnId, loading) {
+    const btn = document.getElementById(btnId);
+    btn.disabled = loading;
+    btn.textContent = loading ? 'Please wait…' : (btnId === 'loginBtn' ? 'Sign In' : 'Redeem Pass');
+  }
+
+  function renderPassDetail(pass) {
+    const detail = document.getElementById('passDetail');
+    document.getElementById('detailStatus').innerHTML =
+      `<span class="badge badge-${pass.status}">${pass.status}</span>`;
+    document.getElementById('detailCode').textContent    = pass.pass_code ?? '—';
+    document.getElementById('detailExpires').textContent = pass.expires_at
+      ? new Date(pass.expires_at).toLocaleString() : '—';
+    detail.classList.add('visible');
+  }
+
+  function clearDetail() {
+    document.getElementById('passDetail').classList.remove('visible');
+  }
+</script>
+
+</body>
+</html>
