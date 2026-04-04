@@ -1,7 +1,8 @@
 'use client';
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
+import type { Map as LeafletMap } from 'leaflet';
 import { supabase } from '@/lib/supabase';
 import { api } from '@/lib/api';
 import { VIBE_STATE_CONFIG, type Venue } from '@/lib/types';
@@ -30,6 +31,16 @@ export default function MapView() {
   const [venues,  setVenues]  = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
+  const mapRef = useRef<LeafletMap | null>(null);
+
+  // Destroy the Leaflet instance on unmount so React StrictMode / HMR
+  // double-invocation never hits "Map container is already initialized".
+  useEffect(() => {
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
 
   const fetchVenues = useCallback(async () => {
     try {
@@ -83,6 +94,7 @@ export default function MapView() {
   return (
     <div className="relative h-[calc(100vh-56px)]">
       <MapContainer
+        ref={mapRef}
         center={KC}
         zoom={13}
         className="h-full w-full"
