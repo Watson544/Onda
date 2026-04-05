@@ -1,5 +1,4 @@
 'use client';
-import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
