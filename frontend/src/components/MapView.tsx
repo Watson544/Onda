@@ -1,55 +1,21 @@
 'use client';
 import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
-import type { Map as LeafletMap } from 'leaflet';
 import { supabase } from '@/lib/supabase';
 import { api } from '@/lib/api';
 import { VIBE_STATE_CONFIG, type Venue } from '@/lib/types';
-import VibeBadge from './VibeBadge';
-import VibeScore from './VibeScore';
-import Link from 'next/link';
 
-const KC: [number, number] = [39.0997, -94.5786];
-
-function FitBounds({ venues }: { venues: Venue[] }) {
-  const map = useMap();
-  useEffect(() => {
-    if (venues.length === 0) return;
-    const lats = venues.map(v => v.lat);
-    const lngs = venues.map(v => v.lng);
-    map.fitBounds([
-      [Math.min(...lats) - 0.01, Math.min(...lngs) - 0.01],
-      [Math.max(...lats) + 0.01, Math.max(...lngs) + 0.01],
-    ]);
-  }, [map, venues]);
-  return null;
-}
+const KC: L.LatLngTuple = [39.0997, -94.5786];
 
 export default function MapView() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef       = useRef<L.Map | null>(null);
   const [venues,  setVenues]  = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
-  const mapRef = useRef<LeafletMap | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (mapRef.current) {
-        // Grab the container div before remove() tears it down.
-        const container = mapRef.current.getContainer();
-        // Destroy the Leaflet instance (clears internal state).
-        mapRef.current.remove();
-        mapRef.current = null;
-        // Explicitly delete the ID Leaflet brands on the DOM node so that
-        // React StrictMode's remount (or webpack HMR) can re-initialize on
-        // the same element without hitting "Map container is already initialized".
-        if (container) {
-          delete (container as unknown as Record<string, unknown>)._leaflet_id;
-        }
-      }
-    };
-  }, []);
-
+  // ── Data fetching ────────────────────────────────────────────────────────
   const fetchVenues = useCallback(async () => {
     try {
       const res = await api.venues.list('Kansas City');
@@ -63,7 +29,7 @@ export default function MapView() {
 
   useEffect(() => { fetchVenues(); }, [fetchVenues]);
 
-  // Supabase Realtime – venue score/state updates
+  // ── Supabase Realtime ────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel('venues-realtime')
@@ -78,10 +44,110 @@ export default function MapView() {
         }
       )
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // ── Map init (once) ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Delete any _leaflet_id left by a previous mount (StrictMode, HMR)
+    // BEFORE calling L.map() so it never sees a pre-branded container.
+    delete (el as unknown as Record<string, unknown>)._leaflet_id;
+
+    const map = L.map(el, { center: KC, zoom: 13, zoomControl: false });
+
+    L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20,
+      }
+    ).addTo(map);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    mapRef.current = map;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []); // runs once; cleanup handles HMR / StrictMode unmount
+
+  // ── Markers (re-render on venue changes) ────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || venues.length === 0) return;
+
+    // Remove any existing circle markers
+    map.eachLayer(layer => {
+      if (layer instanceof L.CircleMarker) map.removeLayer(layer);
+    });
+
+    const lats: number[] = [];
+    const lngs: number[] = [];
+
+    venues.forEach(venue => {
+      const cfg    = VIBE_STATE_CONFIG[venue.vibe_state];
+      const score  = Math.round(venue.vibe_score);
+      const radius = 8 + (score / 100) * 8;
+
+      lats.push(venue.lat);
+      lngs.push(venue.lng);
+
+      const marker = L.circleMarker([venue.lat, venue.lng], {
+        radius,
+        fillColor:   cfg.color,
+        fillOpacity: 0.9,
+        color:       '#09090b',
+        weight:      2,
+      });
+
+      marker.bindPopup(
+        `<div style="min-width:220px;font-family:system-ui,sans-serif;color:#e4e4e7">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div>
+              <strong style="font-size:14px;color:#f4f4f5">${venue.name}</strong>
+              <div style="font-size:12px;color:#a1a1aa;margin-top:2px">
+                ${venue.venue_type ?? 'Venue'} &middot; ${venue.city}
+              </div>
+            </div>
+            <span style="
+              font-size:18px;font-weight:700;color:${cfg.color};
+              background:${cfg.color}22;border:1px solid ${cfg.color}44;
+              border-radius:8px;padding:2px 8px;line-height:1.6
+            ">${score}</span>
+          </div>
+          <span style="
+            font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+            color:${cfg.color};background:${cfg.color}22;
+            border:1px solid ${cfg.color}44;border-radius:999px;padding:2px 8px
+          ">${cfg.label}</span>
+          <div style="font-size:12px;color:#a1a1aa;margin-top:8px">${venue.address}</div>
+          <a href="/venue/${venue.id}"
+             style="display:block;margin-top:10px;text-align:center;font-size:12px;
+                    font-weight:600;color:#a78bfa;text-decoration:none">
+            View details →
+          </a>
+        </div>`,
+        { maxWidth: 280, className: 'onda-popup' }
+      );
+
+      marker.addTo(map);
+    });
+
+    // Fit to all venues
+    map.fitBounds([
+      [Math.min(...lats) - 0.01, Math.min(...lngs) - 0.01],
+      [Math.max(...lats) + 0.01, Math.max(...lngs) + 0.01],
+    ]);
+  }, [venues]);
+
+  // ── Render ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-56px)] bg-onda-bg">
@@ -100,75 +166,8 @@ export default function MapView() {
 
   return (
     <div className="relative h-[calc(100vh-56px)]">
-      <MapContainer
-        ref={mapRef}
-        center={KC}
-        zoom={13}
-        className="h-full w-full"
-        zoomControl={false}
-      >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>'
-          subdomains="abcd"
-          maxZoom={20}
-        />
-        <FitBounds venues={venues} />
-
-        {venues.map(venue => {
-          const cfg   = VIBE_STATE_CONFIG[venue.vibe_state];
-          const score = Math.round(venue.vibe_score);
-          const radius = 8 + (score / 100) * 8;
-
-          return (
-            <CircleMarker
-              key={venue.id}
-              center={[venue.lat, venue.lng]}
-              radius={radius}
-              pathOptions={{
-                fillColor:   cfg.color,
-                fillOpacity: 0.9,
-                color:       '#09090b',
-                weight:      2,
-              }}
-            >
-              <Popup minWidth={240} maxWidth={280}>
-                <div className="p-4">
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div>
-                      <h3 className="font-semibold text-zinc-100 text-sm leading-tight">{venue.name}</h3>
-                      <p className="text-zinc-400 text-xs mt-0.5">{venue.venue_type ?? 'Venue'} · {venue.city}</p>
-                    </div>
-                    <VibeScore score={venue.vibe_score} state={venue.vibe_state} size={56} />
-                  </div>
-
-                  <VibeBadge state={venue.vibe_state} />
-
-                  <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-zinc-400">
-                    <div>
-                      <span className="text-zinc-500 block">Address</span>
-                      <span className="text-zinc-300">{venue.address}</span>
-                    </div>
-                    {venue.venue_type && (
-                      <div>
-                        <span className="text-zinc-500 block">Type</span>
-                        <span className="text-zinc-300 capitalize">{venue.venue_type}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <Link
-                    href={`/venue/${venue.id}`}
-                    className="mt-3 block text-center text-xs font-semibold text-onda-purple hover:text-violet-300 transition-colors"
-                  >
-                    View details →
-                  </Link>
-                </div>
-              </Popup>
-            </CircleMarker>
-          );
-        })}
-      </MapContainer>
+      {/* Leaflet mounts directly into this div — no React wrapper */}
+      <div ref={containerRef} className="h-full w-full" />
 
       {/* Legend */}
       <div className="absolute bottom-6 left-4 z-[999] card p-3 flex flex-col gap-1.5">
