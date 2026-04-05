@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import 'leaflet/dist/leaflet.css';
 import './globals.css';
 import Nav from '@/components/Nav';
 

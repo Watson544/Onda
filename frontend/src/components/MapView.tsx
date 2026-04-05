@@ -1,20 +1,20 @@
 'use client';
-import L from 'leaflet';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { api } from '@/lib/api';
 import { VIBE_STATE_CONFIG, type Venue } from '@/lib/types';
+import VibeBadge from './VibeBadge';
+import VibeScore from './VibeScore';
 
-const KC: L.LatLngTuple = [39.0997, -94.5786];
+const OSM_EMBED =
+  'https://www.openstreetmap.org/export/embed.html?bbox=-94.7,39.0,-94.4,39.2&layer=mapnik';
 
 export default function MapView() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef       = useRef<L.Map | null>(null);
   const [venues,  setVenues]  = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
 
-  // ── Data fetching ────────────────────────────────────────────────────────
   const fetchVenues = useCallback(async () => {
     try {
       const res = await api.venues.list('Kansas City');
@@ -28,7 +28,6 @@ export default function MapView() {
 
   useEffect(() => { fetchVenues(); }, [fetchVenues]);
 
-  // ── Supabase Realtime ────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel('venues-realtime')
@@ -46,157 +45,70 @@ export default function MapView() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // ── Map init (once) ──────────────────────────────────────────────────────
-  useEffect(() => {
-    let destroyed = false;
-
-    (async () => {
-      // Dynamically import Leaflet CSS so it is injected into the page
-      // before the map renders, regardless of bundler chunk ordering.
-      await import('leaflet/dist/leaflet.css');
-
-      const el = containerRef.current;
-      if (!el || destroyed) return;
-
-      // Delete any _leaflet_id left by a previous mount (StrictMode, HMR)
-      // BEFORE calling L.map() so it never sees a pre-branded container.
-      delete (el as unknown as Record<string, unknown>)._leaflet_id;
-
-      const map = L.map(el, { center: KC, zoom: 13, zoomControl: false });
-
-      L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-          subdomains: 'abcd',
-          maxZoom: 20,
-        }
-      ).addTo(map);
-
-      L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-      if (destroyed) { map.remove(); return; }
-      mapRef.current = map;
-    })();
-
-    return () => {
-      destroyed = true;
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
-  }, []); // runs once; cleanup handles HMR / StrictMode unmount
-
-  // ── Markers (re-render on venue changes) ────────────────────────────────
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || venues.length === 0) return;
-
-    // Remove any existing circle markers
-    map.eachLayer(layer => {
-      if (layer instanceof L.CircleMarker) map.removeLayer(layer);
-    });
-
-    const lats: number[] = [];
-    const lngs: number[] = [];
-
-    venues.forEach(venue => {
-      const cfg    = VIBE_STATE_CONFIG[venue.vibe_state];
-      const score  = Math.round(venue.vibe_score);
-      const radius = 8 + (score / 100) * 8;
-
-      lats.push(venue.lat);
-      lngs.push(venue.lng);
-
-      const marker = L.circleMarker([venue.lat, venue.lng], {
-        radius,
-        fillColor:   cfg.color,
-        fillOpacity: 0.9,
-        color:       '#09090b',
-        weight:      2,
-      });
-
-      marker.bindPopup(
-        `<div style="min-width:220px;font-family:system-ui,sans-serif;color:#e4e4e7">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-            <div>
-              <strong style="font-size:14px;color:#f4f4f5">${venue.name}</strong>
-              <div style="font-size:12px;color:#a1a1aa;margin-top:2px">
-                ${venue.venue_type ?? 'Venue'} &middot; ${venue.city}
-              </div>
-            </div>
-            <span style="
-              font-size:18px;font-weight:700;color:${cfg.color};
-              background:${cfg.color}22;border:1px solid ${cfg.color}44;
-              border-radius:8px;padding:2px 8px;line-height:1.6
-            ">${score}</span>
-          </div>
-          <span style="
-            font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
-            color:${cfg.color};background:${cfg.color}22;
-            border:1px solid ${cfg.color}44;border-radius:999px;padding:2px 8px
-          ">${cfg.label}</span>
-          <div style="font-size:12px;color:#a1a1aa;margin-top:8px">${venue.address}</div>
-          <a href="/venue/${venue.id}"
-             style="display:block;margin-top:10px;text-align:center;font-size:12px;
-                    font-weight:600;color:#a78bfa;text-decoration:none">
-            View details →
-          </a>
-        </div>`,
-        { maxWidth: 280, className: 'onda-popup' }
-      );
-
-      marker.addTo(map);
-    });
-
-    // Fit to all venues
-    map.fitBounds([
-      [Math.min(...lats) - 0.01, Math.min(...lngs) - 0.01],
-      [Math.max(...lats) + 0.01, Math.max(...lngs) + 0.01],
-    ]);
-  }, [venues]);
-
-  // ── Render ───────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-56px)] bg-onda-bg">
-        <div className="text-zinc-400 animate-pulse">Loading map…</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-56px)] bg-onda-bg">
-        <div className="text-red-400">{error}</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="relative h-[calc(100vh-56px)]">
-      {/* Leaflet mounts directly into this div — no React wrapper */}
-      <div ref={containerRef} className="h-full w-full" style={{ height: '100%', width: '100%' }} />
-
-      {/* Legend */}
-      <div className="absolute bottom-6 left-4 z-[999] card p-3 flex flex-col gap-1.5">
-        {(Object.entries(VIBE_STATE_CONFIG) as [string, typeof VIBE_STATE_CONFIG[keyof typeof VIBE_STATE_CONFIG]][]).map(([state, cfg]) => (
-          <div key={state} className="flex items-center gap-2 text-xs text-zinc-300">
-            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
-            {cfg.label}
-          </div>
-        ))}
+    <div className="flex h-[calc(100vh-56px)]">
+      {/* ── Map iframe ───────────────────────────────────────────────── */}
+      <div className="flex-1 relative">
+        <iframe
+          src={OSM_EMBED}
+          title="Kansas City map"
+          className="w-full h-full border-0"
+          style={{ display: 'block' }}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+        />
+        {/* Live badge */}
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700 rounded-full px-3 py-1 text-xs text-zinc-300">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+          </span>
+          Live
+        </div>
       </div>
 
-      {/* Live indicator */}
-      <div className="absolute top-4 right-4 z-[999] flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700 rounded-full px-3 py-1 text-xs text-zinc-300">
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-        </span>
-        Live
+      {/* ── Venue list panel ─────────────────────────────────────────── */}
+      <div className="w-80 flex-shrink-0 border-l border-onda-border bg-onda-bg overflow-y-auto">
+        <div className="sticky top-0 bg-onda-bg border-b border-onda-border px-4 py-3 z-10">
+          <h2 className="font-semibold text-zinc-100 text-sm">KC Venues</h2>
+          <p className="text-zinc-500 text-xs mt-0.5">
+            {loading ? 'Loading…' : `${venues.length} venues`}
+          </p>
+        </div>
+
+        {error && (
+          <div className="px-4 py-3 text-red-400 text-sm">{error}</div>
+        )}
+
+        {loading && !error && (
+          <div className="flex flex-col gap-2 p-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-20 rounded-xl bg-zinc-800/50 animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {!loading && venues.length > 0 && (
+          <ul className="divide-y divide-onda-border">
+            {venues.map(venue => (
+              <li key={venue.id}>
+                <Link
+                  href={`/venue/${venue.id}`}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/50 transition-colors"
+                >
+                  <VibeScore score={venue.vibe_score} state={venue.vibe_state} size={44} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-zinc-100 text-sm font-medium truncate">{venue.name}</p>
+                    <p className="text-zinc-500 text-xs truncate mt-0.5">{venue.address}</p>
+                    <div className="mt-1">
+                      <VibeBadge state={venue.vibe_state} />
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
