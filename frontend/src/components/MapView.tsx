@@ -48,32 +48,44 @@ export default function MapView() {
 
   // ── Map init (once) ──────────────────────────────────────────────────────
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    let destroyed = false;
 
-    // Delete any _leaflet_id left by a previous mount (StrictMode, HMR)
-    // BEFORE calling L.map() so it never sees a pre-branded container.
-    delete (el as unknown as Record<string, unknown>)._leaflet_id;
+    (async () => {
+      // Dynamically import Leaflet CSS so it is injected into the page
+      // before the map renders, regardless of bundler chunk ordering.
+      await import('leaflet/dist/leaflet.css');
 
-    const map = L.map(el, { center: KC, zoom: 13, zoomControl: false });
+      const el = containerRef.current;
+      if (!el || destroyed) return;
 
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20,
-      }
-    ).addTo(map);
+      // Delete any _leaflet_id left by a previous mount (StrictMode, HMR)
+      // BEFORE calling L.map() so it never sees a pre-branded container.
+      delete (el as unknown as Record<string, unknown>)._leaflet_id;
 
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
+      const map = L.map(el, { center: KC, zoom: 13, zoomControl: false });
 
-    mapRef.current = map;
+      L.tileLayer(
+        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20,
+        }
+      ).addTo(map);
+
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      if (destroyed) { map.remove(); return; }
+      mapRef.current = map;
+    })();
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      destroyed = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, []); // runs once; cleanup handles HMR / StrictMode unmount
 
@@ -166,7 +178,7 @@ export default function MapView() {
   return (
     <div className="relative h-[calc(100vh-56px)]">
       {/* Leaflet mounts directly into this div — no React wrapper */}
-      <div ref={containerRef} className="h-full w-full" />
+      <div ref={containerRef} className="h-full w-full" style={{ height: '100%', width: '100%' }} />
 
       {/* Legend */}
       <div className="absolute bottom-6 left-4 z-[999] card p-3 flex flex-col gap-1.5">
